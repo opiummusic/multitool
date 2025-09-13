@@ -2,6 +2,7 @@
 #include <furi_hal.h>
 #include <nfc/nfc_device.h>
 #include <mjs.h>
+#include <storage/storage.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdbool.h>
@@ -19,11 +20,50 @@ static mjs_val_t make_tag_object(struct mjs* mjs, const char* uid, const char* t
 static void js_dict_attack(struct mjs* mjs) {
     const char* dict_path = mjs_get_string(mjs, mjs_arg(mjs, 0), NULL);
 
-    // Simulate: Open dictionary file, try keys
-    // Real code: For each key, try authentication, return first valid key
+    // Open dictionary file
+    Storage* storage = furi_record_open("storage");
+    File* file = storage_file_alloc(storage);
 
-    // For demo, pretend we found a key
-    mjs_return(mjs, mjs_mk_string(mjs, "FF FF FF FF FF FF", ~0, 1));
+    if(storage_file_open(file, dict_path, FSAM_READ, FSOM_OPEN_EXISTING)) {
+        char line[32];
+        while(storage_file_gets(file, line, sizeof(line))) {
+            // Remove trailing newline
+            line[strcspn(line, "\r\n")] = 0;
+
+            // Convert hex string to 6-byte key
+            uint8_t key[6] = {0};
+            if(strlen(line) == 12) {
+                for(int i=0; i<6; i++) {
+                    sscanf(line + i*2, "%2hhx", &key[i]);
+                }
+
+                // --- Replace this block with real authentication ---
+                bool success = false;
+                // Example: Try authenticating sector 0 with key A
+                // success = mifare_authenticate(tag, 0, key, KEY_A);
+
+                // For demo, pretend "FFFFFFFFFFFF" always works
+                if(memcmp(key, "\xFF\xFF\xFF\xFF\xFF\xFF", 6) == 0) {
+                    success = true;
+                }
+                // ---------------------------------------------------
+
+                if(success) {
+                    storage_file_close(file);
+                    storage_file_free(file);
+                    furi_record_close("storage");
+                    mjs_return(mjs, mjs_mk_string(mjs, line, ~0, 1));
+                    return;
+                }
+            }
+        }
+        storage_file_close(file);
+    }
+    storage_file_free(file);
+    furi_record_close("storage");
+
+    // No key found
+    mjs_return(mjs, mjs_mk_null());
 }
 
 // ---- Attack: Nested ----
@@ -33,8 +73,10 @@ static void js_nested_attack(struct mjs* mjs) {
     // Simulate nested attack: Use known key to escalate
     // Real code: Use key to run nested authentication and extract more keys
 
-    // For demo, return success (true)
-    mjs_return(mjs, mjs_mk_boolean(mjs, true));
+    // For demo, return success (true) if key is FFFFFFFFFFFF
+    bool success = false;
+    if(strcmp(key, "FFFFFFFFFFFF") == 0) success = true;
+    mjs_return(mjs, mjs_mk_boolean(mjs, success));
 }
 
 // ---- Attack: Hardnested ----
